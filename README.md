@@ -119,7 +119,7 @@ logging:
 ### Installation
 
 ```bash
-git clone https://github.com/Yurnero11/honeypot.git
+git clone https://github.com/Yurnero11/Honeypot-system.git
 cd honeypot
 
 python -m venv .venv
