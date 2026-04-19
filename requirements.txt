@@ -1,0 +1,5 @@
+paramiko
+pandas
+matplotlib
+pyyaml
+requests

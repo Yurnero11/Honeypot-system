@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Honeypot Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; }
+        .container { max-width: 1200px; margin: auto; padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .stats { display: flex; justify-content: space-around; margin-bottom: 20px; }
+        .stat-box { text-align: center; padding: 15px; border: 1px solid #ccc; border-radius: 4px; flex-basis: 30%; background-color: #e9e9e9; }
+        .charts { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 30px; }
+        .chart-container { flex-basis: 50%; }
+        /* Стиль для графіка часової шкали */
+        .full-width-chart { width: 100%; height: 350px; }
+        /* Стиль для клікабельних IP */
+        .ip-link { cursor: pointer; color: #007bff; text-decoration: underline; }
+        .ip-link:hover { color: #0056b3; }
+        /* Стиль для таблиці логів */
+        .log-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .log-table th, .log-table td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 0.9em; word-break: break-word; }
+        .log-table th { background-color: #f2f2f2; }
+        .log-attack { background-color: #ffdddd; color: #dc3545; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Honeypot Activity Dashboard 🍯</h1>
+        <hr>
+
+        <div class="stats">
+            <div class="stat-box">
+                <h2>Total Events</h2>
+                <p id="total_events" style="font-size: 2em; color: #007bff;">...</p>
+            </div>
+            <div class="stat-box">
+                <h2>Total Attacks (IOCs)</h2>
+                <p id="ioc_count" style="font-size: 2em; color: #dc3545;">...</p>
+            </div>
+            <div class="stat-box">
+                <h2>Top MITRE Technique</h2>
+                <p id="top_mitre_display" style="font-size: 1.5em;">...</p>
+            </div>
+        </div>
+
+        <div class="full-width-chart">
+            <h2>Attacks Timeline (Last 24 hours / per hour)</h2>
+            <canvas id="timelineChart"></canvas>
+        </div>
+        <hr style="margin: 30px 0;">
+
+        <div class="charts">
+            <div class="chart-container">
+                <h2>Activity by Service</h2>
+                <canvas id="serviceChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>Top 5 Attack Techniques (MITRE)</h2>
+                <canvas id="mitreChart"></canvas>
+            </div>
+        </div>
+
+        <h2 style="margin-top: 30px;">Top Attacking IPs (Click to view logs)</h2>
+        <ul id="top_ips_list"></ul>
+
+        <div style="margin-top: 40px; padding: 20px; border-top: 2px solid #dc3545; background-color: #ffe5e5; border-radius: 4px;">
+            <h2 style="color: #dc3545; margin-bottom: 10px;">🚨 Last Attacker Activity 🚨</h2>
+            <div id="last_attack_info">
+                <p>Loading...</p>
+            </div>
+        </div>
+
+        <hr style="margin: 40px 0;">
+
+        <div id="detailed_logs_section" style="display: none;">
+            <h2 id="detailed_logs_title">Detailed Logs for IP: ...</h2>
+            <table class="log-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Service</th>
+                        <th>Level</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody id="logs_table_body">
+                    </tbody>
+            </table>
+            <p id="logs_no_data" style="display: none; color: #888;">No logs found for this IP.</p>
+        </div>
+
+    </div>
+
+    <script>
+        // Ініціалізація змінних для графіків (щоб уникнути дублювання)
+        let serviceChartInstance = null;
+        let mitreChartInstance = null;
+        let timelineChartInstance = null;
+
+        async function fetchHoneypotData() {
+            const response = await fetch('/api/data');
+            const data = await response.json();
+            return data;
+        }
+
+        // НОВА ФУНКЦІЯ: Завантаження логів для конкретної IP
+        async function fetchLogsByIp(ip) {
+            const logsBody = document.getElementById('logs_table_body');
+            const logsSection = document.getElementById('detailed_logs_section');
+            const logsTitle = document.getElementById('detailed_logs_title');
+
+            logsBody.innerHTML = '<tr><td colspan="4">Loading logs for ' + ip + '...</td></tr>';
+            logsSection.style.display = 'block';
+            logsTitle.textContent = 'Detailed Logs for IP: ' + ip;
+
+            // Скролимо до секції логів
+            logsSection.scrollIntoView({ behavior: 'smooth' });
+
+            const response = await fetch('/api/logs/' + ip);
+            const data = await response.json();
+
+            logsBody.innerHTML = ''; // Очищення завантажувального повідомлення
+
+            if (data.logs && data.logs.length > 0) {
+                data.logs.forEach(log => {
+                    const row = logsBody.insertRow();
+                    const isAttack = log.level === 'WARNING';
+
+                    if (isAttack) {
+                        row.classList.add('log-attack');
+                    }
+
+                    // Виводимо лише час (без дати)
+                    const displayTime = log.timestamp.split(' ')[1] || log.timestamp;
+
+                    row.insertCell().textContent = displayTime;
+                    row.insertCell().textContent = log.service;
+                    row.insertCell().textContent = log.level;
+                    row.insertCell().textContent = log.full_message;
+                });
+                document.getElementById('logs_no_data').style.display = 'none';
+            } else {
+                document.getElementById('logs_no_data').style.display = 'block';
+            }
+        }
+
+        function renderDashboard(data) {
+            // 1. Статистика
+            document.getElementById('total_events').textContent = data.total_events;
+            document.getElementById('ioc_count').textContent = data.ioc_count;
+            const topMitreKey = Object.keys(data.top_mitre)[0] || 'N/A';
+            document.getElementById('top_mitre_display').textContent = `${topMitreKey} (${data.top_mitre[topMitreKey] || 0})`;
+
+            // Утиліта для знищення старого графіка
+            const destroyChart = (chartInstance) => {
+                if (chartInstance) chartInstance.destroy();
+            };
+
+            // 2. ГРАФІК ЧАСОВОЇ ШКАЛИ АТАК
+            destroyChart(timelineChartInstance);
+            timelineChartInstance = new Chart(document.getElementById('timelineChart'), {
+                type: 'line',
+                data: {
+                    labels: Object.keys(data.attack_timeline),
+                    datasets: [{
+                        label: 'IOC Count per Hour',
+                        data: Object.values(data.attack_timeline),
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        tension: 0.3,
+                        fill: true,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Кількість атак' }
+                        },
+                        x: {
+                            title: { display: true, text: 'Час (Година доби)' }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+
+            // 3. Графік активності за сервісами
+            destroyChart(serviceChartInstance);
+            serviceChartInstance = new Chart(document.getElementById('serviceChart'), {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(data.traffic_by_service),
+                    datasets: [{
+                        label: 'Event Count',
+                        data: Object.values(data.traffic_by_service),
+                        backgroundColor: ['#007bff', '#28a745', '#ffc107', '#dc3545'],
+                    }]
+                },
+                options: {
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+
+            // 4. Графік Top MITRE
+            destroyChart(mitreChartInstance);
+            mitreChartInstance = new Chart(document.getElementById('mitreChart'), {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(data.top_mitre),
+                    datasets: [{
+                        data: Object.values(data.top_mitre),
+                        backgroundColor: ['#dc3545', '#ffc107', '#28a745', '#007bff', '#6c757d'],
+                    }]
+                },
+            });
+
+            // 5. Список Top IPs (Клікабельність)
+            const ipList = document.getElementById('top_ips_list');
+            ipList.innerHTML = '';
+            for (const [ip, count] of Object.entries(data.top_ips)) {
+                const li = document.createElement('li');
+
+                if (ip === 'N/A') {
+                    // Якщо IP невідомий (N/A), робимо його неклікабельним
+                    li.innerHTML = `<span>${ip}</span> (${count} events) <span style="color:#888;">(No detailed logs)</span>`;
+                } else {
+                    // Якщо IP відомий, робимо його клікабельним
+                    li.innerHTML = `<a href="#" class="ip-link" data-ip="${ip}">${ip}</a> (${count} events)`;
+                    li.querySelector('.ip-link').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        fetchLogsByIp(ip);
+                    });
+                }
+                ipList.appendChild(li);
+            }
+
+            // 6. ОСТАННЯ АКТИВНІСТЬ ЗЛОВМИСНИКА
+            const lastAttackDiv = document.getElementById('last_attack_info');
+            const lastAttack = data.last_attack;
+
+            if (lastAttack) {
+                lastAttackDiv.innerHTML = `
+                    <p><strong>Time:</strong> ${lastAttack.timestamp}</p>
+                    <p><strong>Service:</strong> <span style="font-weight: bold; color: #dc3545;">${lastAttack.service}</span></p>
+                    <p><strong>Event:</strong> ${lastAttack.event}</p>
+                    <p><strong>MITRE Techniques:</strong>
+                        <span style="font-weight: bold;">${lastAttack.mitre.join(', ')}</span>
+                    </p>
+                `;
+            } else {
+                lastAttackDiv.innerHTML = '<p>No attack activity recorded yet.</p>';
+            }
+        }
+
+        fetchHoneypotData().then(renderDashboard);
+    </script>
+</body>
+</html>
